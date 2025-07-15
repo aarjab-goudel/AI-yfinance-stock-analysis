@@ -11,33 +11,25 @@ Ticker | Sector | Industry | Date | EV/EBITDA (TTM) | Current Ratio (TTM) 
 P/E (TTM) | ROIC (TTM) | EBITDA/Interest Payments (TTM) | DCF | Price | Price vs DCF %
 """
 
-# ──────────────────────────
-# Standard library
-# ──────────────────────────
+# ────────────────────────── std‑lib ──────────────────────────
 import argparse
 import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-# ──────────────────────────
-# Third‑party
-# ──────────────────────────
+# ───────────────────────── 3rd‑party ─────────────────────────
 import requests
 import pandas as pd
 import numpy as np
 
-# ──────────────────────────
-# Configuration
-# ──────────────────────────
+# ─────────────────────── Configuration ──────────────────────
 API_KEY  = "f3i8Pwil0LKmclScLBtTX1fyqLeYu90g"
 DELAY_S  = 1.0
 BASE_ST  = "https://financialmodelingprep.com/stable"
 HEADERS  = {"User-Agent": "Mozilla/5.0"}
 
-# ──────────────────────────
-# Generic GET‑JSON helper
-# ──────────────────────────
+# ─────────────────────── GET‑JSON helper ────────────────────
 def _get_json(url: str, params: Dict[str, str] | None = None) -> list[dict]:
     params = params or {}
     params["apikey"] = API_KEY
@@ -48,9 +40,7 @@ def _get_json(url: str, params: Dict[str, str] | None = None) -> list[dict]:
     except Exception:
         return []
 
-# ──────────────────────────
-# Per‑field helpers
-# ──────────────────────────
+# ─────────────────────── Field helpers ──────────────────────
 def _profile(symbol: str) -> Tuple[str, str]:
     data = _get_json(f"{BASE_ST}/profile", {"symbol": symbol})
     if data:
@@ -59,7 +49,7 @@ def _profile(symbol: str) -> Tuple[str, str]:
 
 
 def _key_metrics_ttm(symbol: str) -> float:
-    """ROIC (TTM)"""
+    """ROIC (TTM) – returned as decimal (0.47 → 47 %)."""
     data = _get_json(f"{BASE_ST}/key-metrics-ttm", {"symbol": symbol})
     if data:
         roic = data[0].get("returnOnInvestedCapitalTTM", np.nan)
@@ -68,7 +58,6 @@ def _key_metrics_ttm(symbol: str) -> float:
 
 
 def _ev_cr_date(symbol: str) -> Tuple[str, float, float]:
-    """Date, EV/EBITDA (TTM) and Current Ratio (TTM)"""
     data = _get_json(f"{BASE_ST}/key-metrics", {"symbol": symbol})
     if data:
         rec = data[0]
@@ -81,14 +70,13 @@ def _ev_cr_date(symbol: str) -> Tuple[str, float, float]:
 
 
 def _ratios_ttm(symbol: str) -> Tuple[float, float]:
-    """P/E (TTM) and EBITDA/Interest Payments (TTM)"""
     data = _get_json(f"{BASE_ST}/ratios-ttm", {"symbol": symbol})
     if data:
         rec = data[0]
-        pe  = rec.get("priceToEarningsRatioTTM",   np.nan)
-        ic  = rec.get("interestCoverageRatioTTM", np.nan)
-        pe  = float(pe) if pe not in (None, "") else np.nan
-        ic  = float(ic) if ic not in (None, "") else np.nan
+        pe = rec.get("priceToEarningsRatioTTM",   np.nan)
+        ic = rec.get("interestCoverageRatioTTM",  np.nan)
+        pe = float(pe) if pe not in (None, "") else np.nan
+        ic = float(ic) if ic not in (None, "") else np.nan
         return pe, ic
     return np.nan, np.nan
 
@@ -104,14 +92,12 @@ def _dcf_and_price(symbol: str) -> Tuple[float, float]:
         return dcf, price
     return np.nan, np.nan
 
-# ──────────────────────────
-# Consolidated per‑ticker fetch
-# ──────────────────────────
+# ─────────────────── Consolidated per‑ticker ─────────────────
 def fetch_row(symbol: str) -> Dict[str, object]:
     sector, industry = _profile(symbol)
     time.sleep(DELAY_S)
 
-    roic = _key_metrics_ttm(symbol)
+    roic_raw = _key_metrics_ttm(symbol)             # decimal form
     time.sleep(DELAY_S)
 
     date, ev, curr = _ev_cr_date(symbol)
@@ -125,24 +111,25 @@ def fetch_row(symbol: str) -> Dict[str, object]:
 
     price_vs_dcf = (price - dcf) / dcf * 100 if dcf not in (0, np.nan) else np.nan
 
+    # ── convert ROIC to pretty percentage string ──
+    roic_pct = f"{roic_raw * 100:.2f}%" if roic_raw == roic_raw else np.nan  # check for NaN via self‑equality
+
     return {
-        "Ticker":                       symbol,
-        "Sector":                       sector,
-        "Industry":                     industry,
-        "Date":                         date,
-        "EV/EBITDA (TTM)":              ev,
-        "Current Ratio (TTM)":          curr,
-        "P/E (TTM)":                    pe_ttm,
-        "ROIC (TTM)":                   roic,
+        "Ticker":                         symbol,
+        "Sector":                         sector,
+        "Industry":                       industry,
+        "Date":                           date,
+        "EV/EBITDA (TTM)":                ev,
+        "Current Ratio (TTM)":            curr,
+        "P/E (TTM)":                      pe_ttm,
+        "ROIC (TTM)":                     roic_pct,
         "EBITDA/Interest Payments (TTM)": ic_ttm,
-        "DCF":                          dcf,
-        "Price":                        price,
-        "Price vs DCF %":               round(price_vs_dcf, 2) if price_vs_dcf is not np.nan else np.nan,
+        "DCF":                            dcf,
+        "Price":                          price,
+        "Price vs DCF %":                 round(price_vs_dcf, 2) if price_vs_dcf == price_vs_dcf else np.nan,
     }
 
-# ──────────────────────────
-# CLI & main
-# ──────────────────────────
+# ────────────────────────── CLI & main ───────────────────────
 def _parse() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Fetch valuation & solvency metrics from FMP and export to Excel."
